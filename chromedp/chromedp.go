@@ -1,10 +1,11 @@
-package pdf
+package chromedp
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"html/template"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -13,169 +14,88 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/labstack/echo/v4"
 )
 
-// ─── Data structs ────────────────────────────────────────────────────────────
+const (
+	paperWidthIn  = 8.27  // A4
+	paperHeightIn = 11.69 // A4
+	renderTimeout = 20 * time.Second
+	renderSettle  = 2 * time.Second
+)
 
-type PartyInfo struct {
-	Name    string
-	Address string
-	City    string
-	Phone   string
-	Email   string
-}
+var (
+	ErrMissingFilename = errors.New("X-PDF-Name header is required")
+	ErrEmptyBody       = errors.New("HTML body must not be empty")
+)
 
-type InvoiceItem struct {
-	Description string
-	UnitPrice   float64
-	Qty         int
-}
-
-func (i InvoiceItem) Amount() float64 { return i.UnitPrice * float64(i.Qty) }
-
-type PaymentInfo struct {
-	Bank          string
-	AccountName   string
-	AccountNumber string
-}
-
-type PreparedByInfo struct {
-	Name  string
-	Title string
-}
-
-type InvoiceData struct {
-	Number        string
-	Date          time.Time
-	Provider      PartyInfo
-	Client        PartyInfo
-	Items         []InvoiceItem
-	TaxRate       float64
-	Notes         string
-	PaymentMethod PaymentInfo
-	PreparedBy    PreparedByInfo
-}
-
-func (d InvoiceData) SubTotal() float64 {
-	var t float64
-	for _, it := range d.Items {
-		t += it.Amount()
+func SanitizeFilename(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", ErrMissingFilename
 	}
-	return t
-}
-func (d InvoiceData) TaxAmount() float64   { return d.SubTotal() * d.TaxRate }
-func (d InvoiceData) TotalAmount() float64 { return d.SubTotal() + d.TaxAmount() }
 
-// ── Agreement (page 1) ───────────────────────────────────────────────────────
+	name = filepath.Base(name)
+	if !strings.HasSuffix(strings.ToLower(name), ".pdf") {
+		name += ".pdf"
+	}
 
-type ServiceItem struct {
-	Description string
-	NumProjects string
-	PricePerPrj string
+	return name, nil
 }
 
-type AgreementData struct {
-	State           string
-	Day             string
-	Month           string
-	Year            string
-	ProviderName    string
-	ProviderAddress string
-	BuyerName       string
-	BuyerAddress    string
-	Services        []ServiceItem
-	PurchasePrice   string
-	Notes           string
+func ValidateBody(html string) error {
+	if strings.TrimSpace(html) == "" {
+		return ErrEmptyBody
+	}
+	return nil
 }
 
-// ── Payment plan (page 2) ────────────────────────────────────────────────────
-
-type PaymentEntry struct {
-	Date   string
-	Amount string
-}
-
-type PaymentPlanData struct {
-	Payer           string
-	Payee           string
-	Product         string
-	AmountPerPeriod string
-	Interval        string
-	TotalAmount     string
-	Payments        []PaymentEntry
-	LateFee         string
-	BounceFee       string
-	LenderAction    string
-	TermsConditions string
-}
-
-// FullAgreementData combines both pages into one template execution.
-type FullAgreementData struct {
-	AgreementData
-	PaymentPlanData
-}
-
-func ReadHTML(path string) (string, error) {
-	data, err := os.ReadFile(path)
+func Generate(html string) (string, error) {
+	tmpFile, err := os.CreateTemp("", "*.pdf")
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
-}
+	tmpFile.Close()
 
-func RenderHTMLTemplate(path string, data any) (string, error) {
-	funcs := template.FuncMap{
-		"money": func(v float64) string {
-			return fmt.Sprintf("$%.2f", v)
-		},
-		"percent": func(v float64) string {
-			return fmt.Sprintf("%.0f%%", v*100)
-		},
-		"formatDate": func(t time.Time, layout string) string {
-			return t.Format(layout)
-		},
-		"nl2br": func(s string) template.HTML {
-			escaped := template.HTMLEscapeString(s)
-			return template.HTML(strings.ReplaceAll(escaped, "\n", "<br>"))
-		},
-	}
-
-	tmpl, err := template.New(filepath.Base(path)).Funcs(funcs).ParseFiles(path)
-	if err != nil {
+	outputPath := tmpFile.Name()
+	if err = renderToFile(html, outputPath); err != nil {
+		os.Remove(outputPath)
 		return "", err
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
+	return outputPath, nil
 }
 
-// ─── PDF generation ───────────────────────────────────────────────────────────
+func GenerateNamed(html, filename string) (string, error) {
+	os.MkdirAll("pdfs", 0o755)
+	outputPath := filepath.Join("pdfs", filename)
+	if err := renderToFile(html, outputPath); err != nil {
+		return "", err
+	}
+	return outputPath, nil
+}
 
-func GeneratePDF(html string, output string) error {
+func renderToFile(html, outputPath string) error {
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
-	ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
 
+	wrapped := `<html><head><meta charset="UTF-8">` +
+		`<style>body{margin:0;}</style></head><body>` + html + `</body></html>`
+
+	htmlURL := "data:text/html," + url.PathEscape(wrapped)
+
 	var pdfBuf []byte
-
-	formatted := `<html><head><meta charset="UTF-8"><style>body{margin:0;}</style></head><body>` +
-		html + `</body></html>`
-
-	htmlURL := "data:text/html," + url.PathEscape(formatted)
-
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(htmlURL),
-		chromedp.Sleep(2*time.Second),
+		chromedp.Sleep(renderSettle),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			buf, _, err := page.PrintToPDF().
 				WithPrintBackground(true).
-				WithPaperWidth(8.27).
-				WithPaperHeight(11.69).
+				WithPaperWidth(paperWidthIn).
+				WithPaperHeight(paperHeightIn).
 				Do(ctx)
 			pdfBuf = buf
 			return err
@@ -184,5 +104,50 @@ func GeneratePDF(html string, output string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(output, pdfBuf, 0644)
+
+	return os.WriteFile(outputPath, pdfBuf, 0o644)
+}
+
+func GenerateHandler(c echo.Context) error {
+	// Read HTML body
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+	}
+
+	html := string(body)
+
+	// Validate HTML
+	if err := ValidateBody(html); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+	}
+
+	// Get filename from URL param
+	rawFilename := c.Param("filename")
+
+	filename, err := SanitizeFilename(rawFilename)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": err.Error(),
+		})
+	}
+
+	slog.Info("pdf request",
+		"filename", filename,
+		"html_length", len(html),
+	)
+
+	// Generate PDF
+	path, err := GenerateNamed(html, filename)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+	}
+
+	return c.Attachment(path, filename)
 }

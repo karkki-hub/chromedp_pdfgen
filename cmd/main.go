@@ -1,21 +1,27 @@
 package main
 
 import (
+	"log/slog"
+	"net/http"
+	"os"
+
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"chromedp_pdf/chromedp"
+	"github.com/karkki-hub/chromedp_pdfgen/chromedp"
 )
 
 func main() {
 	e := echo.New()
 
-	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
 	e.Static("/", "UI")
 
-	e.POST("/generate-pdf", chromedp.GeneratePDF)
+	e.POST("/generate-pdf/:filename", chromedp.GenerateHandler)
 
-	e.Logger.Fatal(e.Start(":8080"))
+	if err := e.Start(":8080"); err != nil && err != http.ErrServerClosed {
+		slog.Error("shutting down server", "error", err)
+		os.Exit(1)
+	}
 }

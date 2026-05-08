@@ -3,9 +3,6 @@ package chromedp
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -14,7 +11,6 @@ import (
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
-	"github.com/labstack/echo/v4"
 )
 
 const (
@@ -50,24 +46,10 @@ func ValidateBody(html string) error {
 	return nil
 }
 
-func Generate(html string) (string, error) {
-	tmpFile, err := os.CreateTemp("", "*.pdf")
-	if err != nil {
-		return "", err
-	}
-	tmpFile.Close()
-
-	outputPath := tmpFile.Name()
-	if err = renderToFile(html, outputPath); err != nil {
-		os.Remove(outputPath)
-		return "", err
-	}
-
-	return outputPath, nil
-}
-
 func GenerateNamed(html, filename string) (string, error) {
-	os.MkdirAll("pdfs", 0o755)
+	if err := os.MkdirAll("pdfs", 0o755); err != nil {
+		return "", err
+	}
 	outputPath := filepath.Join("pdfs", filename)
 	if err := renderToFile(html, outputPath); err != nil {
 		return "", err
@@ -106,48 +88,4 @@ func renderToFile(html, outputPath string) error {
 	}
 
 	return os.WriteFile(outputPath, pdfBuf, 0o644)
-}
-
-func GenerateHandler(c echo.Context) error {
-	// Read HTML body
-	body, err := io.ReadAll(c.Request().Body)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-	}
-
-	html := string(body)
-
-	// Validate HTML
-	if err := ValidateBody(html); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-	}
-
-	// Get filename from URL param
-	rawFilename := c.Param("filename")
-
-	filename, err := SanitizeFilename(rawFilename)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{
-			"error": err.Error(),
-		})
-	}
-
-	slog.Info("pdf request",
-		"filename", filename,
-		"html_length", len(html),
-	)
-
-	// Generate PDF
-	path, err := GenerateNamed(html, filename)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": err.Error(),
-		})
-	}
-
-	return c.Attachment(path, filename)
 }

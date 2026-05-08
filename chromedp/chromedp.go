@@ -47,10 +47,10 @@ func ValidateBody(html string) error {
 }
 
 func GenerateNamed(html, filename string) (string, error) {
-	if err := os.MkdirAll("pdfs", 0o755); err != nil {
+	if err := os.MkdirAll(".pdfs", 0o755); err != nil {
 		return "", err
 	}
-	outputPath := filepath.Join("pdfs", filename)
+	outputPath := filepath.Join(".pdfs", filename)
 	if err := renderToFile(html, outputPath); err != nil {
 		return "", err
 	}

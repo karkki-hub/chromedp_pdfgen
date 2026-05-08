@@ -13,7 +13,7 @@
 
 # Dependency directories (uncomment if using dep)
 # vendor/
-*pdfs/
+.pdfs/
 # Go workspace file
 go.work
 

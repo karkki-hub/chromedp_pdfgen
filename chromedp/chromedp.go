@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	paperWidthIn  = 8.27  // A4
-	paperHeightIn = 11.69 // A4
 	renderTimeout = 20 * time.Second
 	renderSettle  = 2 * time.Second
 )
@@ -24,6 +22,27 @@ var (
 	ErrMissingFilename = errors.New("X-PDF-Name header is required")
 	ErrEmptyBody       = errors.New("HTML body must not be empty")
 )
+
+func paperDimensions(size string) (float64, float64) {
+	widths := map[string]float64{
+		"A4":     8.27,
+		"Letter": 8.5,
+		"Legal":  8.5,
+	}
+
+	heights := map[string]float64{
+		"A4":     11.69,
+		"Letter": 11,
+		"Legal":  14,
+	}
+
+	if w, ok := widths[size]; ok {
+		return w, heights[size]
+	}
+
+	// default A4
+	return widths["A4"], heights["A4"]
+}
 
 func SanitizeFilename(raw string) (string, error) {
 	name := strings.TrimSpace(raw)
@@ -46,18 +65,18 @@ func ValidateBody(html string) error {
 	return nil
 }
 
-func GenerateNamed(html, filename string) (string, error) {
-	if err := os.MkdirAll(".pdfs", 0o755); err != nil {
+func GenerateNamed(html, filename, size string) (string, error) {
+	if err := os.MkdirAll("/temp", 0o755); err != nil {
 		return "", err
 	}
-	outputPath := filepath.Join(".pdfs", filename)
-	if err := renderToFile(html, outputPath); err != nil {
+	outputPath := filepath.Join("/temp", filename)
+	if err := renderToFile(html, outputPath, size); err != nil {
 		return "", err
 	}
 	return outputPath, nil
 }
 
-func renderToFile(html, outputPath string) error {
+func renderToFile(html, outputPath, size string) error {
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
@@ -69,6 +88,8 @@ func renderToFile(html, outputPath string) error {
 
 	htmlURL := "data:text/html," + url.PathEscape(wrapped)
 
+	w, h := paperDimensions(size)
+
 	var pdfBuf []byte
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(htmlURL),
@@ -76,8 +97,8 @@ func renderToFile(html, outputPath string) error {
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			buf, _, err := page.PrintToPDF().
 				WithPrintBackground(true).
-				WithPaperWidth(paperWidthIn).
-				WithPaperHeight(paperHeightIn).
+				WithPaperWidth(w).
+				WithPaperHeight(h).
 				Do(ctx)
 			pdfBuf = buf
 			return err

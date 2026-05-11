@@ -1,9 +1,7 @@
 package chromedp
 
 import (
-	"bytes"
 	"encoding/json"
-	"html/template"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,8 +10,9 @@ import (
 )
 
 type RequestBody struct {
-	Template string         `json:"template"`
-	Data     map[string]any `json:"data"`
+	HTML     string `json:"html"`
+	Filename string `json:"filename"`
+	Size     string `json:"size"` // A4, Letter, Legal
 }
 
 func GenerateHandler(c echo.Context) error {
@@ -27,33 +26,30 @@ func GenerateHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 	}
 
-	if req.Template == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "template field is required"})
+	if req.HTML == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "html field is required"})
 	}
 
-	if err := ValidateBody(req.Template); err != nil {
+	if req.Filename == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "filename field is required"})
+	}
+
+	if len(req.Filename) > 50 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "filename must be 50 characters or less"})
+	}
+
+	if err := ValidateBody(req.HTML); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	tmpl, err := template.New("doc").Parse(req.Template)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "template parse error: " + err.Error()})
-	}
-
-	var rendered bytes.Buffer
-	if err := tmpl.Execute(&rendered, req.Data); err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "template render error: " + err.Error()})
-	}
-
-	rawFilename := c.Param("filename")
-	filename, err := SanitizeFilename(rawFilename)
+	filename, err := SanitizeFilename(req.Filename)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	slog.Info("pdf request", "filename", filename, "html_length", rendered.Len())
+	slog.Info("pdf request", "filename", filename, "html_length", len(req.HTML))
 
-	path, err := GenerateNamed(rendered.String(), filename)
+	path, err := GenerateNamed(req.HTML, filename, req.Size)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

@@ -18,7 +18,8 @@ func main() {
 
 	e.Static("/", "UI")
 
-	e.POST("/generate-pdf/:filename", chromedp.GenerateHandler)
+	e.POST("/v1/generatepdf", chromedp.GenerateHandler)
+	e.GET("/health", chromedp.HealthHandler)
 
 	if err := e.Start(":8080"); err != nil && err != http.ErrServerClosed {
 		slog.Error("shutting down server", "error", err)

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -56,7 +57,6 @@ func ValidateSize(size string, customWidth, customHeight float64) (PageSize, err
 		}
 		return PageSize{Width: customWidth, Height: customHeight}, nil
 	}
-
 	if size == "" {
 		size = "A4"
 	}
@@ -78,11 +78,13 @@ func ValidateSize(size string, customWidth, customHeight float64) (PageSize, err
 func GenerateHandler(c echo.Context) error {
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
+		slog.Error("failed to read request body", "error", err)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	var req RequestBody
 	if err := json.Unmarshal(body, &req); err != nil {
+		slog.Error("failed to parse request JSON", "error", err)
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 	}
 
@@ -106,7 +108,6 @@ func GenerateHandler(c echo.Context) error {
 	}
 
 	w, h := parseFloat(req.CustomWidth, req.CustomHeight)
-
 	pageSize, err := ValidateSize(req.Size, w, h)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -116,13 +117,24 @@ func GenerateHandler(c echo.Context) error {
 
 	path, err := GenerateNamed(req.HTML, filename, pageSize.Width, pageSize.Height)
 	if err != nil {
+		slog.Error("pdf generation failed", "filename", filename, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
 	return c.Attachment(path, filename)
 }
 
+func HealthHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{
+		"start_time": time.Now().Format("2006-01-02 15:04:05 Monday"),
+		"status":     "OK",
+	})
+}
+
 func parseFloat(w, h string) (float64, float64) {
+	if w == "" || h == "" {
+		return 0, 0
+	}
 	fw, err := strconv.ParseFloat(w, 64)
 	fh, err := strconv.ParseFloat(h, 64)
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +12,17 @@ import (
 )
 
 func main() {
+	err := chromedp.Qr()
+
+	content := "https://github.com/yeqown/go-qrcode"
+	chromedp.CreateQRWithLogo(content)
+
+	fmt.Println("All QR codes generated successfully.")
+
+	if err != nil {
+		slog.Error("failed to generate QR code", "error", err)
+		os.Exit(1)
+	}
 	e := echo.New()
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{

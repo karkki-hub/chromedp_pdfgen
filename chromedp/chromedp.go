@@ -2,12 +2,9 @@ package chromedp
 
 import (
 	"context"
-	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
-
-	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
@@ -18,32 +15,6 @@ const (
 	renderTimeout = 20 * time.Second
 	renderSettle  = 2 * time.Second
 )
-
-var (
-	ErrMissingFilename = errors.New("X-PDF-Name header is required")
-	ErrEmptyBody       = errors.New("HTML body must not be empty")
-)
-
-func SanitizeFilename(raw string) (string, error) {
-	name := strings.TrimSpace(raw)
-	if name == "" {
-		return "", ErrMissingFilename
-	}
-
-	name = filepath.Base(name)
-	if !strings.HasSuffix(strings.ToLower(name), ".pdf") {
-		name += ".pdf"
-	}
-
-	return name, nil
-}
-
-func ValidateBody(html string) error {
-	if strings.TrimSpace(html) == "" {
-		return ErrEmptyBody
-	}
-	return nil
-}
 
 func GenerateNamed(html, filename string, width, height float64) (string, error) {
 	if err := os.MkdirAll("/temp", 0o755); err != nil {

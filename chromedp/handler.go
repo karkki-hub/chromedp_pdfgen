@@ -1,17 +1,26 @@
 package chromedp
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/labstack/echo/v4"
+)
+
+var (
+	errMissingFilename = errors.New("filename field is required")
+	errEmptyHTML       = errors.New("html field is required")
 )
 
 type RequestBody struct {
@@ -27,27 +36,25 @@ type PageSize struct {
 	Height float64
 }
 
-var ValidSizes = map[string]PageSize{
+var validSizes = map[string]PageSize{
 	"A4":     {Width: 8.27, Height: 11.69},
 	"Letter": {Width: 8.5, Height: 11},
 	"Legal":  {Width: 8.5, Height: 14},
 }
 
-func ValidateDimension(value, field string) error {
-	if value == "" {
-		return fmt.Errorf("%s is required when using custom size", field)
+func sanitizeFilename(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "", errMissingFilename
 	}
-	if !strings.HasSuffix(value, "in") {
-		return fmt.Errorf("%s '%s' is invalid\nvalid format: e.g. 6, 8.5", field, value)
+	name = filepath.Base(name)
+	if !strings.HasSuffix(strings.ToLower(name), ".pdf") {
+		name += ".pdf"
 	}
-	numberPart := strings.TrimSuffix(value, "in")
-	if _, err := strconv.ParseFloat(numberPart, 64); err != nil {
-		return fmt.Errorf("%s '%s' is invalid\nvalid format: e.g. 6, 8.5", field, value)
-	}
-	return nil
+	return name, nil
 }
 
-func ValidateSize(size string, customWidth, customHeight float64) (PageSize, error) {
+func validateSize(size string, customWidth, customHeight float64) (PageSize, error) {
 	if customWidth != 0 || customHeight != 0 {
 		if size != "" {
 			return PageSize{}, fmt.Errorf("size and custom_width/custom_height are mutually exclusive")
@@ -57,22 +64,41 @@ func ValidateSize(size string, customWidth, customHeight float64) (PageSize, err
 		}
 		return PageSize{Width: customWidth, Height: customHeight}, nil
 	}
+
 	if size == "" {
 		size = "A4"
 	}
-	ps, ok := ValidSizes[size]
+	ps, ok := validSizes[size]
 	if !ok {
 		var lines []string
-		for name, dims := range ValidSizes {
+		for name, dims := range validSizes {
 			lines = append(lines, fmt.Sprintf("  %s  width - %.2f  height - %.2f", name, dims.Width, dims.Height))
 		}
 		sort.Strings(lines)
 		return PageSize{}, fmt.Errorf(
-			"the size '%s' is invalid\nvalid formats:\n%s\nor provide custom_width and custom_height instead",
+			"invalid size '%s'\nvalid sizes:\n%s\nor provide custom_width and custom_height instead",
 			size, strings.Join(lines, "\n"),
 		)
 	}
 	return ps, nil
+}
+
+func parseCustomDimensions(w, h string) (float64, float64, error) {
+	if w == "" && h == "" {
+		return 0, 0, nil
+	}
+	if w == "" || h == "" {
+		return 0, 0, fmt.Errorf("custom_width and custom_height must both be provided together")
+	}
+	fw, err := strconv.ParseFloat(w, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid custom_width '%s': must be a number (e.g. 8.5)", w)
+	}
+	fh, err := strconv.ParseFloat(h, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid custom_height '%s': must be a number (e.g. 11)", h)
+	}
+	return fw, fh, nil
 }
 
 func GenerateHandler(c echo.Context) error {
@@ -88,34 +114,45 @@ func GenerateHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 	}
 
-	if req.HTML == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "html field is required"})
-	}
-	if req.Filename == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "filename field is required"})
+	if strings.TrimSpace(req.HTML) == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errEmptyHTML.Error()})
 	}
 	if len(req.Filename) > 50 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "filename must be 50 characters or less"})
 	}
 
-	if err := ValidateBody(req.HTML); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-
-	filename, err := SanitizeFilename(req.Filename)
+	filename, err := sanitizeFilename(req.Filename)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
-	w, h := parseFloat(req.CustomWidth, req.CustomHeight)
-	pageSize, err := ValidateSize(req.Size, w, h)
+	w, h, err := parseCustomDimensions(req.CustomWidth, req.CustomHeight)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+
+	pageSize, err := validateSize(req.Size, w, h)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 
 	slog.Info("pdf request", "filename", filename, "html_length", len(req.HTML), "page_size", pageSize)
 
-	path, err := GenerateNamed(req.HTML, filename, pageSize.Width, pageSize.Height)
+	Htmlbyts, err := base64.StdEncoding.DecodeString(req.HTML)
+	if err != nil {
+		slog.Error("failed to decode HTML content", "error", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid base64 HTML content: " + err.Error()})
+	}
+
+	Html := string(Htmlbyts)
+
+	Htmlerr := ValidateHTML(Html)
+	if Htmlerr != nil {
+		slog.Error("invalid HTML content", "error", Htmlerr)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid HTML content: " + Htmlerr.Error()})
+	}
+
+	path, err := GenerateNamed(Html, filename, pageSize.Width, pageSize.Height)
 	if err != nil {
 		slog.Error("pdf generation failed", "filename", filename, "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -126,19 +163,25 @@ func GenerateHandler(c echo.Context) error {
 
 func HealthHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
-		"start_time": time.Now().Format("2006-01-02 15:04:05 Monday"),
-		"status":     "OK",
+		"time":   time.Now().Format("2006-01-02 15:04:05 Monday"),
+		"status": "OK",
 	})
 }
 
-func parseFloat(w, h string) (float64, float64) {
-	if w == "" || h == "" {
-		return 0, 0
+func ValidateHTML(html string) error {
+	if strings.TrimSpace(html) == "" {
+		return errors.New("HTML content cannot be empty")
 	}
-	fw, err := strconv.ParseFloat(w, 64)
-	fh, err := strconv.ParseFloat(h, 64)
-	if err != nil {
-		return 8.27, 11.69 // A4 size default
+
+	lower := strings.ToLower(html)
+	for _, tag := range []string{"<html", "<head", "<body"} {
+		if !strings.Contains(lower, tag) {
+			return fmt.Errorf("HTML content must contain <%s> tag", tag)
+		}
 	}
-	return fw, fh
+
+	if _, err := template.New("validate").Parse(html); err != nil {
+		return fmt.Errorf("HTML content is not valid: %v", err)
+	}
+	return nil
 }

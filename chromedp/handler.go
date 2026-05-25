@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	// "image"
 	"io"
 	"log/slog"
 	"net/http"
@@ -184,4 +186,17 @@ func ValidateHTML(html string) error {
 		return fmt.Errorf("HTML content is not valid: %v", err)
 	}
 	return nil
+}
+
+func Qr1Handler(c echo.Context) error {
+	CreateQRWithLogo("example.com")
+	return c.Attachment("qrcode_with_logo.png", "qrcode_with_logo.png")
+}
+
+func Qr2Handler(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{"message": "QR2 endpoint is working"})
+}
+
+func FetchLogoHandler(c echo.Context) error {
+	return c.Attachment("logo.jpg", "logo.jpg")
 }

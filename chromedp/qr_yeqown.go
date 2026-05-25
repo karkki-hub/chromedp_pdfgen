@@ -18,7 +18,7 @@ func CreateQRWithLogo(content string) {
 		return
 	}
 
-	getLogoURL := "https://amateurphotographer.com/wp-content/uploads/sites/7/2022/05/crop5.jpg"
+	getLogoURL := "https://localhost8080/fetchlogo"
 	errl := UrlGet(getLogoURL)
 	if errl != nil {
 		fmt.Printf("failed to fetch logo: %v\n", errl)
@@ -26,8 +26,8 @@ func CreateQRWithLogo(content string) {
 	}
 
 	options := []standard.ImageOption{
-		standard.WithLogoImageFileJPEG("logo.jpg"),
-		standard.WithQRWidth(150),
+		// standard.WithLogoImageFileJPEG("logo.jpg"),
+		standard.WithQRWidth(70),
 	}
 	writer, err := standard.New("qrcode_with_logo.png", options...)
 	if err != nil {

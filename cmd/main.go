@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	// "fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,17 +12,17 @@ import (
 )
 
 func main() {
-	err := chromedp.Qr()
+	// err := chromedp.Qr()
 
-	content := "https://github.com/yeqown/go-qrcode"
-	chromedp.CreateQRWithLogo(content)
+	// content := "https://github.com/yeqown/go-qrcode"
+	// chromedp.CreateQRWithLogo(content)
 
-	fmt.Println("All QR codes generated successfully.")
+	// fmt.Println("All QR codes generated successfully.")
 
-	if err != nil {
-		slog.Error("failed to generate QR code", "error", err)
-		os.Exit(1)
-	}
+	// if err != nil {
+	// 	slog.Error("failed to generate QR code", "error", err)
+	// 	os.Exit(1)
+	// }
 	e := echo.New()
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
@@ -55,6 +55,9 @@ func main() {
 	e.Static("/", "UI")
 	e.POST("/v1/generatepdf", chromedp.GenerateHandler)
 	e.GET("/health", chromedp.HealthHandler)
+	e.POST("/qr1", chromedp.Qr1Handler)
+	e.POST("/qr2", chromedp.Qr2Handler)
+	e.GET("/fetchlogo", chromedp.FetchLogoHandler)
 
 	if err := e.Start(":8080"); err != nil && err != http.ErrServerClosed {
 		slog.Error("shutting down server", "error", err)

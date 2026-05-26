@@ -2,20 +2,14 @@ package chromedp
 
 import (
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 
 	"github.com/yeqown/go-qrcode/v2"
 	"github.com/yeqown/go-qrcode/writer/standard"
 )
 
-// createQRWithLogo generates a QR code using the WithLogo option.
-func CreateQRWithLogo(content string, logoURL string, dimension int) error {
-	var options []standard.ImageOption
-
-	fmt.Printf("Creating QR code with content: %s, logoURL: %s, dimension: %d\n",
-		content, logoURL, dimension)
+func CreateQRWithLogo(content string, logoURL string, dimension int, border int) error {
+	fmt.Printf("Creating QR code with content: %s, logoURL: %s, dimension: %d, border: %d\n",
+		content, logoURL, dimension, border)
 
 	qr, err := qrcode.New(content)
 	if err != nil {
@@ -23,75 +17,61 @@ func CreateQRWithLogo(content string, logoURL string, dimension int) error {
 		return err
 	}
 
-	if logoURL != "" { // If a logo URL is provided, fetch the logo and include it in the QR code options
-		err = UrlGet(logoURL)
-		if err != nil {
+	version := qrVersionFromContent(content)
+	modules := (version-1)*4 + 21
+	qrWidth := uint8(dimension / modules)
+	if qrWidth < 1 {
+		qrWidth = 1
+	}
+
+	fmt.Printf("QR version: %d, modules: %d, qrWidth per module: %d\n", version, modules, qrWidth)
+
+	var options []standard.ImageOption
+
+	if logoURL != "" {
+		if err = UrlGet(logoURL); err != nil {
 			fmt.Printf("failed to fetch logo: %v\n", err)
 			return err
 		}
 
-		options = []standard.ImageOption{ // Set the logo image and QR code width based on the dimension
-			standard.WithLogoImageFileJPEG("logo1.jpg"),
-			standard.WithQRWidth(reversePattern(dimension)),
-			standard.WithBorderWidth(0),
+		nativeQRSize := int(qrWidth) * modules
+		targetLogoSize := nativeQRSize / 5
+
+		fmt.Printf("Native QR size: %dpx, target logo size: %dpx\n", nativeQRSize, targetLogoSize)
+
+		if err = resizeLogoToTarget("logo1.jpg", targetLogoSize); err != nil {
+			fmt.Printf("failed to resize logo: %v\n", err)
+			return err
 		}
-	} else { // If no logo URL is provided, just set the QR code width based on the dimension
+
 		options = []standard.ImageOption{
-			standard.WithQRWidth(reversePattern(dimension)),
-			standard.WithBorderWidth(0),
+			standard.WithLogoImageFileJPEG("logo1.jpg"),
+			standard.WithQRWidth(qrWidth),
+			standard.WithBorderWidth(border),
+		}
+	} else {
+		options = []standard.ImageOption{
+			standard.WithQRWidth(qrWidth),
+			standard.WithBorderWidth(border),
 		}
 	}
 
-	writer, err := standard.New("qrcode_with_logo.png", options...) // Create a new writer with the specified options
+	writer, err := standard.New("qrcode_with_logo.png", options...)
 	if err != nil {
 		fmt.Printf("create writer failed: %v\n", err)
 		return err
 	}
 	defer writer.Close()
 
-	if err = qr.Save(writer); err != nil { // Save the QR code using the writer, which will generate the image file
+	if err = qr.Save(writer); err != nil {
 		fmt.Printf("save qrcode failed: %v\n", err)
 		return err
 	}
 
+	if err = resizeImage("qrcode_with_logo.png", dimension); err != nil {
+		fmt.Printf("resize failed: %v\n", err)
+		return err
+	}
+
 	return nil
-}
-
-func UrlGet(url string) error {
-	client := &http.Client{}
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-
-	// Pretend to be a browser
-	req.Header.Set("User-Agent",
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
-	}
-
-	outfile, err := os.Create("logo1.jpg")
-	if err != nil {
-		return err
-	}
-	defer outfile.Close()
-
-	_, err = io.Copy(outfile, resp.Body)
-	return err
-}
-
-func reversePattern(value int) uint8 { // The pattern size is determined by the dimension divided by 21, which is the number of modules in a version 1 QR code.
-
-	a := uint8(value / 21)
-	fmt.Println("Calculated pattern size:", a, value)
-	return a
 }

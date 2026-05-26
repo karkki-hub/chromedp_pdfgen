@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/ahmedtahas/qr-gode v1.3.1 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
@@ -19,15 +20,18 @@ require (
 	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
+	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c // indirect
+	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/yeqown/go-qrcode/v2 v2.2.5 // indirect
 	github.com/yeqown/go-qrcode/writer/standard v1.3.0 // indirect
 	github.com/yeqown/reedsolomon v1.0.0 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/image v0.40.0 // indirect
+	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect

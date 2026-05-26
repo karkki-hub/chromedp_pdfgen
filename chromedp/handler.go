@@ -28,6 +28,7 @@ var (
 type QrRequest struct {
 	Content   string `json:"content"`   //contains the data to encode in the QR code
 	Dimension string `json:"dimension"` //specifies the pixel dimensions of the level 1 QR code
+	Border    int    `json:"border"`    //optional border width around the QR code (default is 4)
 	LogoURL   string `json:"logo_url"`  //optional URL of the logo image to embed in the center of the QR code
 }
 
@@ -212,7 +213,10 @@ func Qr1Handler(c echo.Context) error { // expects JSON body with "content", "di
 	if dim <= 50 {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "dimension must be greater than 50"}) // 400 if dimension is not greater than 50
 	}
-	if err := CreateQRWithLogo(req.Content, req.LogoURL, int(dim)); err != nil {
+	if req.Border < 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "border must be non-negative"}) // 400 if border is negative
+	}
+	if err := CreateQRWithLogo(req.Content, req.LogoURL, int(dim), req.Border); err != nil {
 		slog.Error("failed to create QR code with logo", "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create QR code: " + err.Error()})
 	}
@@ -225,15 +229,28 @@ func Qr2Handler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 	}
 	if strings.TrimSpace(req.Content) == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "content field is required"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "content field is required"}) // 400 if content is empty
 	}
-	if err := Qr(req.Content); err != nil {
+	if strings.TrimSpace(req.Dimension) == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "dimension field is required"}) // 400 if dimension is empty
+	}
+	dim, err := strconv.ParseInt(req.Dimension, 10, 64)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid dimension: " + err.Error()})
+	}
+	if dim <= 50 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "dimension must be greater than 50"}) // 400 if dimension is not greater than 50
+	}
+	if req.Border < 0 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "border must be non-negative"}) // 400 if border is negative
+	}
+	if err := CreateQRWithLogo2(req.Content, req.LogoURL, int(dim), req.Border); err != nil {
 		slog.Error("failed to create QR code with logo", "error", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create QR code: " + err.Error()})
 	}
-	return c.Attachment("qr_output.png", "qr_output.png")
+	return c.Attachment("qrcode_with_logo.png", "qrcode_with_logo.png")
 }
 
 func FetchLogoHandler(c echo.Context) error {
-	return c.Attachment("download.jpg", "download.jpg")
+	return c.Attachment("logo.jpg", "download.jpg")
 }

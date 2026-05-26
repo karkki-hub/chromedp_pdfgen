@@ -1,4 +1,4 @@
-package chromedp
+package qrgen
 
 import (
 	"fmt"
@@ -12,12 +12,15 @@ import (
 	qrgode "github.com/ahmedtahas/qr-gode"
 )
 
+// content - data to encode in the QR code
+// dimension - pixel dimensions of the QR code image (e.g. 300 for 300x300)
+// border - optional border width around the QR code (default is 4)
+// logoURL - optional URL of the logo image to embed in the center of the QR code
 func CreateQRWithLogo2(content string, logoURL string, dimension int, border int) error {
 
 	builder := qrgode.New(content).
 		Size(dimension).
 		QuietZone(border).
-		// LogoWidth(50).
 		LogoBackground("transparent").
 		LogoMode(qrgode.LogoOverlay).
 		ErrorCorrection(qrgode.LevelH)
@@ -28,7 +31,7 @@ func CreateQRWithLogo2(content string, logoURL string, dimension int, border int
 			return err
 		}
 
-		builder = builder.Logo("cf.png")
+		builder = builder.Logo("logo1.jpg")
 
 		for _, w := range builder.ScannabilityWarnings() {
 			fmt.Printf("scannability warning: %s\n", w)

@@ -1,4 +1,4 @@
-package chromedp
+package qrgen
 
 import (
 	"fmt"
@@ -12,6 +12,7 @@ import (
 	"github.com/nfnt/resize"
 )
 
+// qrVersionFromContent determines the QR code version based on the content length.
 func qrVersionFromContent(content string) int {
 	contentLen := len(content)
 

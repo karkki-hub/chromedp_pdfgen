@@ -16,6 +16,10 @@ const (
 	renderSettle  = 2 * time.Second
 )
 
+// html - base64 encoded HTML content
+// filename - desired output PDF filename (e.g. "output.pdf")
+// width - paper width in inches
+// height - paper height in inches
 func GenerateNamed(html, filename string, width, height float64) (string, error) {
 	if err := os.MkdirAll("/temp", 0o755); err != nil {
 		return "", err
@@ -27,6 +31,9 @@ func GenerateNamed(html, filename string, width, height float64) (string, error)
 	return outputPath, nil
 }
 
+// html - base64 encoded HTML content
+// width - paper width in inches
+// height - paper height in inches
 func renderToFile(html, outputPath string, width, height float64) error {
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()

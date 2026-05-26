@@ -1,4 +1,4 @@
-package chromedp
+package qrgen
 
 import (
 	"fmt"
@@ -7,6 +7,10 @@ import (
 	"github.com/yeqown/go-qrcode/writer/standard"
 )
 
+// content - data to encode in the QR code
+// dimension - pixel dimensions of the QR code image (e.g. 300 for 300x300)
+// border - optional border width around the QR code (default is 4)
+// logoURL - optional URL of the logo image to embed in the center of the QR code
 func CreateQRWithLogo(content string, logoURL string, dimension int, border int) error {
 	fmt.Printf("Creating QR code with content: %s, logoURL: %s, dimension: %d, border: %d\n",
 		content, logoURL, dimension, border)

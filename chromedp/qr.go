@@ -18,10 +18,10 @@ import (
 	xdraw "golang.org/x/image/draw"
 )
 
-func Qr() error {
-	content := flag.String("content", "https://example.com", "Data to encode in the QR code")
+func Qr(co string) error {
+	content := flag.String("content", co, "Data to encode in the QR code")
 	size := flag.Int("size", 512, "Width/height of the QR image in pixels")
-	logoURL := flag.String("logo", "https://amateurphotographer.com/wp-content/uploads/sites/7/2022/05/crop5.jpg", "URL of the logo image (PNG or JPEG)")
+	logoURL := flag.String("logo", "http://localhost:8080/fetchlogo", "URL of the logo image (PNG or JPEG)")
 	fgHex := flag.String("fg", "#000000", "Foreground (module) colour as #RRGGBB")
 	bgHex := flag.String("bg", "#FFFFFF", "Background colour as #RRGGBB")
 	output := flag.String("output", "qr_output.png", "Output file path (.png)")

@@ -11,40 +11,50 @@ import (
 )
 
 // createQRWithLogo generates a QR code using the WithLogo option.
-func CreateQRWithLogo(content string) {
+func CreateQRWithLogo(content string, logoURL string, dimension int) error {
+	var options []standard.ImageOption
+
+	fmt.Printf("Creating QR code with content: %s, logoURL: %s, dimension: %d\n",
+		content, logoURL, dimension)
+
 	qr, err := qrcode.New(content)
 	if err != nil {
 		fmt.Printf("create qrcode failed: %v\n", err)
-		return
+		return err
 	}
 
-	getLogoURL := "https://localhost8080/fetchlogo"
-	errl := UrlGet(getLogoURL)
-	if errl != nil {
-		fmt.Printf("failed to fetch logo: %v\n", errl)
-		return
+	if logoURL != "" { // If a logo URL is provided, fetch the logo and include it in the QR code options
+		err = UrlGet(logoURL)
+		if err != nil {
+			fmt.Printf("failed to fetch logo: %v\n", err)
+			return err
+		}
+
+		options = []standard.ImageOption{ // Set the logo image and QR code width based on the dimension
+			standard.WithLogoImageFileJPEG("logo1.jpg"),
+			standard.WithQRWidth(reversePattern(dimension)),
+			standard.WithBorderWidth(0),
+		}
+	} else { // If no logo URL is provided, just set the QR code width based on the dimension
+		options = []standard.ImageOption{
+			standard.WithQRWidth(reversePattern(dimension)),
+			standard.WithBorderWidth(0),
+		}
 	}
 
-	options := []standard.ImageOption{
-		// standard.WithLogoImageFileJPEG("logo.jpg"),
-		standard.WithQRWidth(70),
-	}
-	writer, err := standard.New("qrcode_with_logo.png", options...)
+	writer, err := standard.New("qrcode_with_logo.png", options...) // Create a new writer with the specified options
 	if err != nil {
 		fmt.Printf("create writer failed: %v\n", err)
-		return
+		return err
 	}
-	outfile, err := os.Create("qrcode_with_logo.png")
-	if err != nil {
-		fmt.Printf("create output file failed: %v\n", err)
-		return
-	}
-	defer outfile.Close()
-
 	defer writer.Close()
-	if err = qr.Save(writer); err != nil {
+
+	if err = qr.Save(writer); err != nil { // Save the QR code using the writer, which will generate the image file
 		fmt.Printf("save qrcode failed: %v\n", err)
+		return err
 	}
+
+	return nil
 }
 
 func UrlGet(url string) error {
@@ -69,7 +79,7 @@ func UrlGet(url string) error {
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	outfile, err := os.Create("logo.jpg")
+	outfile, err := os.Create("logo1.jpg")
 	if err != nil {
 		return err
 	}
@@ -77,4 +87,11 @@ func UrlGet(url string) error {
 
 	_, err = io.Copy(outfile, resp.Body)
 	return err
+}
+
+func reversePattern(value int) uint8 { // The pattern size is determined by the dimension divided by 21, which is the number of modules in a version 1 QR code.
+
+	a := uint8(value / 21)
+	fmt.Println("Calculated pattern size:", a, value)
+	return a
 }

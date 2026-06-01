@@ -1,22 +1,32 @@
 package qrgen
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
-	"io"
+	"log/slog"
+	"net/http"
 	"os"
 
 	qrgode "github.com/ahmedtahas/qr-gode"
 )
 
-// content - data to encode in the QR code
-// dimension - pixel dimensions of the QR code image (e.g. 300 for 300x300)
-// border - optional border width around the QR code (default is 4)
-// logoURL - optional URL of the logo image to embed in the center of the QR code
-func CreateQRWithLogo2(content string, logoURL string, dimension int, border int) error {
+// CreateQRWithLogo2 generates a QR code PNG using the qr-gode library.
+//
+//   - ctx       – request context; cancellation aborts logo fetching
+//   - content   – data to encode
+//   - logoURL   – optional URL of the logo to embed in the centre
+//   - dimension – output image size in pixels
+//   - border    – quiet-zone width in modules
+//   - cfg       – service-level configuration (size limits, etc.)
+//
+// Returns the path to a temporary PNG file. The caller must remove it.
+func CreateQRWithLogo2(ctx context.Context, content, logoURL string, dimension, border int, cfg Config) (string, error) {
+	slog.Info("creating QR code (qr-gode)", "dimension", dimension, "border", border, "hasLogo", logoURL != "")
 
 	builder := qrgode.New(content).
 		Size(dimension).
@@ -26,67 +36,61 @@ func CreateQRWithLogo2(content string, logoURL string, dimension int, border int
 		ErrorCorrection(qrgode.LevelH)
 
 	if logoURL != "" {
-		if err := UrlGet(logoURL); err != nil {
-			fmt.Printf("failed to fetch logo: %v\n", err)
-			return err
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, logoURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("build logo request: %w", err)
 		}
+		logoPath, err := UrlGet(req, cfg.MaxLogoBytes)
+		if err != nil {
+			slog.Error("failed to fetch logo", "url", logoURL, "error", err)
+			return "", fmt.Errorf("fetch logo: %w", err)
+		}
+		defer os.Remove(logoPath)
 
-		builder = builder.Logo("logo1.jpg")
+		builder = builder.Logo(logoPath)
 
 		for _, w := range builder.ScannabilityWarnings() {
-			fmt.Printf("scannability warning: %s\n", w)
+			slog.Warn("QR scannability warning", "warning", w)
 		}
 	}
 
-	// Get PNG bytes from the library
 	pngBytes, err := builder.PNG()
 	if err != nil {
-		fmt.Printf("generate qrcode failed: %v\n", err)
-		return err
+		return "", fmt.Errorf("generate qr png: %w", err)
 	}
 
-	// Decode the generated PNG
-	qrImg, err := png.Decode(bytesReader(pngBytes))
+	qrImg, err := png.Decode(bytes.NewReader(pngBytes))
 	if err != nil {
-		fmt.Printf("decode qrcode failed: %v\n", err)
-		return err
+		return "", fmt.Errorf("decode qr png: %w", err)
 	}
 
+	// Composite onto a white background so any transparency becomes white.
 	bounds := qrImg.Bounds()
 	white := image.NewRGBA(bounds)
 	draw.Draw(white, bounds, &image.Uniform{color.White}, image.Point{}, draw.Src)
 	draw.Draw(white, bounds, qrImg, image.Point{}, draw.Over)
 
-	out, err := os.Create("qrcode_with_logo.png")
+	// Write to a temp file; clean up on any error via success flag.
+	out, err := os.CreateTemp("", "qrcode-*.png")
 	if err != nil {
-		return err
+		return "", fmt.Errorf("create temp output file: %w", err)
 	}
-	defer out.Close()
+	outPath := out.Name()
+
+	success := false
+	defer func() {
+		if !success {
+			os.Remove(outPath)
+		}
+	}()
 
 	if err = png.Encode(out, white); err != nil {
-		fmt.Printf("save qrcode failed: %v\n", err)
-		return err
+		out.Close()
+		return "", fmt.Errorf("encode qr png: %w", err)
 	}
+	out.Close()
 
-	fmt.Println("QR code saved to qrcode_with_logo.png")
-	return nil
-}
-
-// bytesReader wraps a byte slice as an io.Reader.
-func bytesReader(b []byte) io.Reader {
-	return &bytesReaderImpl{b: b, pos: 0}
-}
-
-type bytesReaderImpl struct {
-	b   []byte
-	pos int
-}
-
-func (r *bytesReaderImpl) Read(p []byte) (n int, err error) {
-	if r.pos >= len(r.b) {
-		return 0, io.EOF
-	}
-	n = copy(p, r.b[r.pos:])
-	r.pos += n
-	return n, nil
+	success = true
+	slog.Info("QR code ready (qr-gode)", "path", outPath)
+	return outPath, nil
 }

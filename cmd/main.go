@@ -42,11 +42,13 @@ func main() {
 		},
 	}))
 
+	cfg := qrgen.DefaultConfig()
+
 	e.Static("/", "UI")
 	e.POST("/v1/generatepdf", chromedp.GenerateHandler)
 	e.GET("/health", chromedp.HealthHandler)
-	e.POST("/qr1", qrgen.Qr1Handler)
-	e.POST("/qr2", qrgen.Qr2Handler)
+	e.POST("/qr1", qrgen.Qr1Handler(cfg))
+	e.POST("/qr2", qrgen.Qr2Handler(cfg))
 	e.GET("/fetchlogo", qrgen.FetchLogoHandler)
 
 	if err := e.Start(":8080"); err != nil && err != http.ErrServerClosed {

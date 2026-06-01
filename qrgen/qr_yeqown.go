@@ -1,24 +1,32 @@
 package qrgen
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
 
 	"github.com/yeqown/go-qrcode/v2"
 	"github.com/yeqown/go-qrcode/writer/standard"
 )
 
-// content - data to encode in the QR code
-// dimension - pixel dimensions of the QR code image (e.g. 300 for 300x300)
-// border - optional border width around the QR code (default is 4)
-// logoURL - optional URL of the logo image to embed in the center of the QR code
-func CreateQRWithLogo(content string, logoURL string, dimension int, border int) error {
-	fmt.Printf("Creating QR code with content: %s, logoURL: %s, dimension: %d, border: %d\n",
-		content, logoURL, dimension, border)
+// CreateQRWithLogo generates a QR code PNG using the yeqown library.
+//
+//   - ctx       – request context; cancellation aborts logo fetching
+//   - content   – data to encode
+//   - logoURL   – optional URL of the logo to embed in the centre
+//   - dimension – output image size in pixels
+//   - border    – quiet-zone border width in pixels
+//   - cfg       – service-level configuration (size limits, logo ratio, etc.)
+//
+// Returns the path to a temporary PNG file. The caller must remove it.
+func CreateQRWithLogo(ctx context.Context, content, logoURL string, dimension, border int, cfg Config) (string, error) {
+	slog.Info("creating QR code (yeqown)", "dimension", dimension, "border", border, "hasLogo", logoURL != "")
 
 	qr, err := qrcode.New(content)
 	if err != nil {
-		fmt.Printf("create qrcode failed: %v\n", err)
-		return err
+		return "", fmt.Errorf("create qrcode: %w", err)
 	}
 
 	version := qrVersionFromContent(content)
@@ -28,28 +36,47 @@ func CreateQRWithLogo(content string, logoURL string, dimension int, border int)
 		qrWidth = 1
 	}
 
-	fmt.Printf("QR version: %d, modules: %d, qrWidth per module: %d\n", version, modules, qrWidth)
+	slog.Info("QR parameters", "version", version, "modules", modules, "qrWidthPerModule", qrWidth)
+
+	// Reserve a temp output path; clean up on any error via success flag.
+	tmpOut, err := os.CreateTemp("", "qrcode-*.png")
+	if err != nil {
+		return "", fmt.Errorf("create temp output file: %w", err)
+	}
+	outPath := tmpOut.Name()
+	tmpOut.Close() // yeqown opens by path; release our handle first
+
+	success := false
+	defer func() {
+		if !success {
+			os.Remove(outPath)
+		}
+	}()
 
 	var options []standard.ImageOption
 
 	if logoURL != "" {
-		if err = UrlGet(logoURL); err != nil {
-			fmt.Printf("failed to fetch logo: %v\n", err)
-			return err
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, logoURL, nil)
+		if err != nil {
+			return "", fmt.Errorf("build logo request: %w", err)
 		}
+		logoPath, err := UrlGet(req, cfg.MaxLogoBytes)
+		if err != nil {
+			slog.Error("failed to fetch logo", "url", logoURL, "error", err)
+			return "", fmt.Errorf("fetch logo: %w", err)
+		}
+		defer os.Remove(logoPath)
 
 		nativeQRSize := int(qrWidth) * modules
-		targetLogoSize := nativeQRSize / 5
+		targetLogoSize := int(float64(nativeQRSize) * cfg.LogoSizeRatio)
+		slog.Info("logo sizing", "nativeQRSize", nativeQRSize, "targetLogoSize", targetLogoSize)
 
-		fmt.Printf("Native QR size: %dpx, target logo size: %dpx\n", nativeQRSize, targetLogoSize)
-
-		if err = resizeLogoToTarget("logo1.jpg", targetLogoSize); err != nil {
-			fmt.Printf("failed to resize logo: %v\n", err)
-			return err
+		if err = resizeLogoToTarget(logoPath, targetLogoSize); err != nil {
+			return "", fmt.Errorf("resize logo: %w", err)
 		}
 
 		options = []standard.ImageOption{
-			standard.WithLogoImageFileJPEG("logo1.jpg"),
+			standard.WithLogoImageFileJPEG(logoPath),
 			standard.WithQRWidth(qrWidth),
 			standard.WithBorderWidth(border),
 		}
@@ -60,22 +87,21 @@ func CreateQRWithLogo(content string, logoURL string, dimension int, border int)
 		}
 	}
 
-	writer, err := standard.New("qrcode_with_logo.png", options...)
+	writer, err := standard.New(outPath, options...)
 	if err != nil {
-		fmt.Printf("create writer failed: %v\n", err)
-		return err
+		return "", fmt.Errorf("create writer: %w", err)
 	}
 	defer writer.Close()
 
 	if err = qr.Save(writer); err != nil {
-		fmt.Printf("save qrcode failed: %v\n", err)
-		return err
+		return "", fmt.Errorf("save qrcode: %w", err)
 	}
 
-	if err = resizeImage("qrcode_with_logo.png", dimension); err != nil {
-		fmt.Printf("resize failed: %v\n", err)
-		return err
+	if err = resizeImage(outPath, dimension); err != nil {
+		return "", fmt.Errorf("resize output: %w", err)
 	}
 
-	return nil
+	success = true
+	slog.Info("QR code ready (yeqown)", "path", outPath)
+	return outPath, nil
 }
